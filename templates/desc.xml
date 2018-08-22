@@ -1,0 +1,25 @@
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+    <specVersion>
+        <major>1</major>
+        <minor>0</minor>
+    </specVersion>
+    <device>
+        <deviceType>{{device_type}}</deviceType>
+        <friendlyName>{{friendly_name}}</friendlyName>
+        <modelName>{{model_name}}</modelName>
+        <manufacturer>shao.lo@gmail.com</manufacturer>
+        <manufacturerURL>https://github.com/shaolo1/VideoServer</manufacturerURL>
+        <modelDescription>UPnP Video Server</modelDescription>
+        <modelNumber>{{version}}</modelNumber>
+        <modelURL>https://github.com/shaolo1</modelURL>
+        <UDN>{{udn}}</UDN>
+        <serviceList>
+            <service>
+                <serviceType>{{service_type}}</serviceType>
+                <serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId>
+                <SCPDURL>/scpd.xml</SCPDURL>
+                <controlURL>/ctrl</controlURL>
+            </service>
+        </serviceList>
+    </device>
+</root>
