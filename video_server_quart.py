@@ -32,6 +32,7 @@ import socket
 import struct
 import time
 
+from enum import Enum
 from http import HTTPStatus
 from threading import Thread
 from typing import List, Optional
@@ -179,7 +180,7 @@ class VideoItem(BaseItem):
             # DLNA.ORG_PN = More specific mime_type info ...tv won't display the images without the more specific mime_type
             root.append(self.res_element(cover, mime_type, size, 'DLNA.ORG_PN=JPEG_TN'))
 # TODO: add resolution="1600x1200"..use pillow to get it..to see if this helps tv render better?
-# <res protocolInfo="http‐get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
+# <res protocolInfo="http?get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
 
         if self._captions and self._captions.endswith('.srt'):
             self._captions = self._res_path(url, self._captions)
@@ -417,7 +418,7 @@ class VideoServer:
     @staticmethod
     def get_range(headers):
         byte_range = headers.get('Range', headers.get('range'))
-        match = None if not byte_range else re.match('bytes=(?P<start>\d+)-(?P<end>\d+)?', byte_range)
+        match = None if not byte_range else re.match(r'bytes=(?P<start>\d+)-(?P<end>\d+)?', byte_range)
         if not match:
             return False, 0, None
         start = match.group('start')
@@ -437,15 +438,6 @@ class VideoServer:
         self._ssdp_server.shutdown()
 
 
-class SimpleEnum:
-    """This is not an Enum class solely to remove the str cast requirement.  Elements are returned as the value
-    component only making them work as indices without having to do some_dict[Enum.foo.value] or some_dict[str(Enum.foo)]"""
-    def __getattr__(self, name):
-        if name in self:
-            return name
-        raise AttributeError
-
-
 class SSDPServer(asyncio.DatagramProtocol):
     """Simple Service Discovery Protocol
     see spec - http://www.upnp.org/specs/arch/UPnP-arch-DeviceArchitecture-v1.0-20080424.pdf"""
@@ -454,7 +446,7 @@ class SSDPServer(asyncio.DatagramProtocol):
     # Concatenation of OS name, OS version, UPnP/1.0, product name, and product version ..see spec
     SERVER_ID = f'{platform.system()},{platform.release()},UPnP/1.0,{__service_name__},{__version__}'
 
-    class Header(SimpleEnum):
+    class Header(str, Enum):
         NT = 'nt'  # Notification Type
         NTS = 'nts'  # Notification Sub Type
         ST = 'st'  # Search Target
@@ -465,7 +457,7 @@ class SSDPServer(asyncio.DatagramProtocol):
         CACHE_CONTROL = 'cache-control'
         LOCATION = 'location'  # Device description xml url
 
-    class Messages(SimpleEnum):
+    class Messages(Enum):
         ALIVE = 'ssdp:alive'
         BYE = 'ssdp:byebye'
         ALL = 'ssdp:all'
