@@ -180,7 +180,7 @@ class VideoItem(BaseItem):
             # DLNA.ORG_PN = More specific mime_type info ...tv won't display the images without the more specific mime_type
             root.append(self.res_element(cover, mime_type, size, 'DLNA.ORG_PN=JPEG_TN'))
 # TODO: add resolution="1600x1200"..use pillow to get it..to see if this helps tv render better?
-# <res protocolInfo="http?get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
+# <res protocolInfo="http-get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
 
         if self._captions and self._captions.endswith('.srt'):
             self._captions = self._res_path(url, self._captions)
@@ -323,14 +323,35 @@ class VideoServer:
             mime_type = item.get_mime_type()
 
             async def generate(chunk_size=2**16):  # Default to 64k chunks
-                # async with aiofiles.open(_path, 'rb', buffering=4096) as _file:  # TODO" use buffering?
-                async with aiofiles.open(_path, 'rb') as f:
-                    await f.seek(start)
-                    while True:
-                        data = await f.read(chunk_size)
-                        if not data:
-                            break
-                        yield data
+                # def handle_async_exception(loop, ctx):
+                #     # pytest.fail("Exception in async task: {0}".format(ctx['exception']))
+                #     # except asyncio.CancelledError as e:
+                #     # print('generate cancelled')#, e)
+                #     # except asyncio.TimeoutError as e:
+                #     # print('generate timeout')#, e)
+                #     print('generate async exception', ctx)
+                #
+                # asyncio.get_event_loop().set_exception_handler(handle_async_exception)
+                try:
+                    sent = 0
+                    # async with aiofiles.open(_path, 'rb', buffering=4096) as _file:  # TODO" use buffering?
+                    async with aiofiles.open(_path, 'rb') as f:
+                        await f.seek(start)
+                        while True:
+                            data = await f.read(chunk_size)
+                            if not data:
+                                print('no data?!')
+                                break
+                            sent += len(data)
+                            print(sent)
+                            yield data
+                        print('end while')
+                except asyncio.CancelledError as e:
+                    print('generate cancelled')#, e)
+                except asyncio.TimeoutError as e:
+                    print('generate timeout')#, e)
+                except Exception as e:
+                    print('generate other?')#, e)
 
             stats = os.stat(_path)
             end = stats.st_size if end is None else end
@@ -356,12 +377,12 @@ class VideoServer:
     async def _browse_error(code):
         assert code in [401, 402]
         rendered = await render_template('browse_error.xml', code=code, desc='Invalid Action' if code == 401 else 'Invalid Args')
-        return Response(rendered, HTTPStatus.INTERNAL_SERVER_ERROR, mimetype='text/xml')
+        return Response(rendered, int(HTTPStatus.INTERNAL_SERVER_ERROR), mimetype='text/xml')  # temp cast fix for quart/h11 bug
 
     async def _handle_control(self):
         """Handle a SOAP command."""
         if 'text/xml' not in request.headers['content-type']:
-            return self._browse_error(401)
+            return await self._browse_error(401)
         data = await request.data
 
         def _parse():
@@ -377,17 +398,17 @@ class VideoServer:
 
         method, method_name = _parse()
         if method is None:
-            return self._browse_error(401)
+            return await self._browse_error(401)
         if method_name != 'Browse':
-            return self._browse_error(401)
+            return await self._browse_error(401)
         browse_flag = method.find('BrowseFlag')
         if browse_flag is None:
-            return self._browse_error(402)
+            return await self._browse_error(402)
 
         object_id = method.find('ObjectID').text
         browse_item = self._file_store.get_by_id(object_id)
         if browse_item is None:
-            return self._browse_error(402)
+            return await self._browse_error(402)
         browse_direct_children = browse_flag.text == 'BrowseDirectChildren'
         starting_index = int(method.find('StartingIndex').text)
         requested_count = int(method.find('RequestedCount').text)
@@ -457,7 +478,7 @@ class SSDPServer(asyncio.DatagramProtocol):
         CACHE_CONTROL = 'cache-control'
         LOCATION = 'location'  # Device description xml url
 
-    class Messages(Enum):
+    class Messages(str, Enum):
         ALIVE = 'ssdp:alive'
         BYE = 'ssdp:byebye'
         ALL = 'ssdp:all'
@@ -586,7 +607,7 @@ def main():
     parser.add_argument('--device_name', default='Videos')
     args = parser.parse_args()
 
-    # logging.getLogger('werkzeug').setLevel(logging.ERROR)  # Disable flask request logging...TODO: quart equivalent?
+    # logging.getLogger('quart.serving').setLevel(logging.ERROR)  # Disable quart request logging...
 
     if not args.port:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

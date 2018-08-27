@@ -164,7 +164,7 @@ class VideoItem(BaseItem):
             # DLNA.ORG_PN = More specific mime_type info ...tv won't display the images without the more specific mime_type
             root.append(self.res_element(cover, mime_type, size, 'DLNA.ORG_PN=JPEG_TN'))
 # TODO: add resolution="1600x1200"..use pillow to get it..to see if this helps tv render better?
-# <res protocolInfo="http?get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
+# <res protocolInfo="http-get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
 
         if self._captions and self._captions.endswith('.srt'):
             self._captions = self._res_path(url, self._captions)
@@ -439,7 +439,7 @@ class SSDPServer(asyncio.DatagramProtocol):
         CACHE_CONTROL = 'cache-control'
         LOCATION = 'location'  # Device description xml url
 
-    class Messages(Enum):
+    class Messages(str, Enum):
         ALIVE = 'ssdp:alive'
         BYE = 'ssdp:byebye'
         ALL = 'ssdp:all'
