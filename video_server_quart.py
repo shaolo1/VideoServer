@@ -5,7 +5,6 @@
 
     WARNING: This Quart based version is a work in progress.  There are a few known issues that are
     still being worked on.
-      - playback stops after some time
       - shutdown after playback is not cleaning up properly
 
     :copyright: 2018 by shao.lo@gmail.com
@@ -323,35 +322,13 @@ class VideoServer:
             mime_type = item.get_mime_type()
 
             async def generate(chunk_size=2**16):  # Default to 64k chunks
-                # def handle_async_exception(loop, ctx):
-                #     # pytest.fail("Exception in async task: {0}".format(ctx['exception']))
-                #     # except asyncio.CancelledError as e:
-                #     # print('generate cancelled')#, e)
-                #     # except asyncio.TimeoutError as e:
-                #     # print('generate timeout')#, e)
-                #     print('generate async exception', ctx)
-                #
-                # asyncio.get_event_loop().set_exception_handler(handle_async_exception)
-                try:
-                    sent = 0
-                    # async with aiofiles.open(_path, 'rb', buffering=4096) as _file:  # TODO" use buffering?
-                    async with aiofiles.open(_path, 'rb') as f:
-                        await f.seek(start)
-                        while True:
-                            data = await f.read(chunk_size)
-                            if not data:
-                                print('no data?!')
-                                break
-                            sent += len(data)
-                            print(sent)
-                            yield data
-                        print('end while')
-                except asyncio.CancelledError as e:
-                    print('generate cancelled')#, e)
-                except asyncio.TimeoutError as e:
-                    print('generate timeout')#, e)
-                except Exception as e:
-                    print('generate other?')#, e)
+                async with aiofiles.open(_path, 'rb') as f:
+                    await f.seek(start)
+                    while True:
+                        data = await f.read(chunk_size)
+                        if not data:
+                            break
+                        yield data
 
             stats = os.stat(_path)
             end = stats.st_size if end is None else end
@@ -365,6 +342,7 @@ class VideoServer:
                 headers['Content-Range'] = f'bytes {start}-{end-1}/{size}'
             response = await make_response((generate(), int(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK), headers))  # Workaround for h11 string formatting bug
             # print('outbound headers', response.headers)
+            response.timeout = None  # No timeout
             return response
 
         @app.route('/', defaults={'path': ''})
@@ -607,7 +585,7 @@ def main():
     parser.add_argument('--device_name', default='Videos')
     args = parser.parse_args()
 
-    # logging.getLogger('quart.serving').setLevel(logging.ERROR)  # Disable quart request logging...
+    logging.getLogger('quart.serving').setLevel(logging.ERROR)  # Disable quart request logging...
 
     if not args.port:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
