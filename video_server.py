@@ -27,6 +27,7 @@ import struct
 import time
 
 from enum import Enum
+from functools import partial
 from http import HTTPStatus
 from threading import Thread
 from typing import List, Optional
@@ -80,7 +81,7 @@ class BaseItem(abc.ABC):
         return self._file_path
 
     def get_name(self):
-        return os.path.basename(self._file_path)
+        return os.path.splitext(os.path.basename(self._file_path))[0]
 
     def get_parent(self):
         return self._parent
@@ -303,16 +304,13 @@ class VideoServer:
                     response = Response('<html><p>Captions srt file not found</p></html>', HTTPStatus.NOT_FOUND, mimetype='text/html')
                     return response
 
-            partial, start, end = self.get_range(request.headers)
+            part, start, end = self.get_range(request.headers)
             mime_type = item.get_mime_type()
 
             def generate(chunk_size=2**16):  # Default to 64k chunks
                 with open(_path, 'rb') as f:
                     f.seek(start)
-                    while True:
-                        data = f.read(chunk_size)
-                        if not data:
-                            break
+                    for data in iter(partial(f.read, chunk_size), ''):
                         yield data
 
             stats = os.stat(_path)
@@ -323,9 +321,9 @@ class VideoServer:
                        # DLNA.ORG_OP = Time range capable / Byte range capable
                        'Contentfeatures.dlna.org': 'DLNA.ORG_OP=01'  # TV will try to read entire file without this
                        }
-            if partial:
+            if part:
                 headers['Content-Range'] = f'bytes {start}-{end-1}/{size}'
-            response = Response(generate(), HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK, headers=headers, direct_passthrough=True)
+            response = Response(generate(), HTTPStatus.PARTIAL_CONTENT if part else HTTPStatus.OK, headers=headers, direct_passthrough=True)
             # print('outbound headers', response.headers)
             return response
 

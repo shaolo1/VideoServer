@@ -31,6 +31,7 @@ import socket
 import struct
 import time
 
+from contextlib import suppress
 from enum import Enum
 from http import HTTPStatus
 from threading import Thread
@@ -95,7 +96,7 @@ class BaseItem(abc.ABC):
         return self._file_path
 
     def get_name(self):
-        return os.path.basename(self._file_path)
+        return os.path.splitext(os.path.basename(self._file_path))[0]
 
     def get_parent(self):
         return self._parent
@@ -318,10 +319,13 @@ class VideoServer:
                     response = Response('<html><p>Captions srt file not found</p></html>', int(HTTPStatus.NOT_FOUND), mimetype='text/html')
                     return response
 
-            partial, start, end = self.get_range(request.headers)
+            part, start, end = self.get_range(request.headers)
             mime_type = item.get_mime_type()
 
-            async def generate(chunk_size=2**16):  # Default to 64k chunks
+            # async def generate(chunk_size=2**16):  # Default to 64k chunks...too much buffering w 10 sec fast forwarding
+            # async def generate(chunk_size=2**19):  # Default to 512k chunks...generates "RuntimeError: Non-thread-safe operation invoked on an event loop other than the current one" see https://stackoverflow.com/questions/49093623/strange-behaviour-when-task-added-to-empty-loop-in-different-thread  TODO: debug this
+            # async def generate(chunk_size=2**18):  # Default to 256k chunks ...same errors as 512
+            async def generate(chunk_size=2**17):  # Default to 128k chunks
                 async with aiofiles.open(_path, 'rb') as f:
                     await f.seek(start)
                     while True:
@@ -338,9 +342,9 @@ class VideoServer:
                        # DLNA.ORG_OP = Time range capable / Byte range capable
                        'Contentfeatures.dlna.org': 'DLNA.ORG_OP=01'  # TV will try to read entire file without this
                        }
-            if partial:
+            if part:
                 headers['Content-Range'] = f'bytes {start}-{end-1}/{size}'
-            response = await make_response((generate(), int(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK), headers))  # Workaround for h11 string formatting bug
+            response = await make_response((generate(), int(HTTPStatus.PARTIAL_CONTENT if part else HTTPStatus.OK), headers))  # Workaround for h11 string formatting bug
             # print('outbound headers', response.headers)
             response.timeout = None  # No timeout
             return response
@@ -585,7 +589,7 @@ def main():
     parser.add_argument('--device_name', default='Videos')
     args = parser.parse_args()
 
-    logging.getLogger('quart.serving').setLevel(logging.ERROR)  # Disable quart request logging...
+    logging.getLogger('quart.serving').setLevel(logging.ERROR)  # Disable quart request logging
 
     if not args.port:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
