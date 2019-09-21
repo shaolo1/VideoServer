@@ -11,7 +11,18 @@ pip install Flask
 
 
 
-Or for the Quart version ...a work in progress with some known issues...making it pretty unsable at the moment
+Or for the Aiohttp version
+
+
+pip intall aiohttp
+
+pip intall aiohttp_jinja2
+
+pip intall async_generator
+
+
+
+Or for the Quart version ...a work in progress with some known issues...making it pretty unsable at the moment (Now that an aiohttp version exists this is probably dead).
 
 
 pip intall aiofiles
