@@ -6,7 +6,7 @@
     :copyright: 2018 by shao.lo@gmail.com
     :license: GPL3, see LICENSE for more details.
 """
-__version_info__ = (0, 0, 1)
+__version_info__ = (0, 0, 2)
 __version__ = '.'.join(map(str, __version_info__))
 __service_name__ = 'VideoServer'
 
@@ -18,7 +18,6 @@ import base64
 import datetime
 import itertools
 import jinja2
-import logging
 import mimetypes
 import os
 import platform
@@ -271,55 +270,31 @@ class VideoServer:
 
         @routes.get('/favicon.ico')
         async def fav_icon(request):
-            # print('fav_icon')
             return web.Response(body='', status=HTTPStatus.NOT_FOUND)
-
-        # @routes.get('/scpd.xml')
-        # @aiohttp_jinja2.template('scpd.xml')
-        # async def scpd_xml(request):
-        #     """Service Control Point Definition"""
-        #     print('scpd_xml')
-        #     return {'Content-Type': 'text/xml'}
 
         @routes.get('/scpd.xml')
         async def scpd_xml(request):
             """Service Control Point Definition"""
-            # print('scpd_xml')
             response = aiohttp_jinja2.render_template('scpd.xml', request, {})
             response.headers['Content-Type'] = 'text/xml'
             return response
 
         @routes.post('/ctrl')
         async def control(request):
-            # print('control')
             return await self._handle_control(request)
-
-        # @aiohttp_jinja2.template('desc.xml')
-        # @routes.get('/desc.xml')
-        # async def desc_xml(request):
-        #     print('desc_xml')
-        #     return {'udn': self._unique_device_name, 'device_type': self._device_type, 'service_type': self._service_type,
-        #         'friendly_name': friendly_name, 'model_name': __service_name__, 'version': __version__}
-        #         , {'Content-Type': 'text/xml'} not supported here..use form below
 
         @routes.get('/desc.xml')
         async def desc_xml(request):
-            # print('desc_xml')
             context = {'udn': self._unique_device_name, 'device_type': self._device_type, 'service_type': self._service_type,
                        'friendly_name': friendly_name, 'model_name': __service_name__, 'version': __version__}
             response = aiohttp_jinja2.render_template('desc.xml', request, context)
             response.headers['Content-Type'] = 'text/xml'
             return response
 
-        # @app.route('/<media_file>', methods=['HEAD', 'GET'])
         @routes.get('/{media_file}')
-        # @routes.head('/{media_file}')  head allowed in get unless flag is passed to disallow
         async def media(request):
-            # print('media')
             media_file = request.match_info['media_file']
-            # print(f'media {media_file}')
             res = request.rel_url.query.get('res')
-            # print(f'media res {res}')
             if res:
                 path = base64.b64decode(res.encode()).decode('ascii')
                 return web.FileResponse(path)  # Return cover image
@@ -330,11 +305,8 @@ class VideoServer:
             _path = item.get_path()
 
             if request.method == 'HEAD':
-                # print('head')
                 if 'getcaptioninfo.sec' in request.headers:
-                    # print('getcaptioninfo')
                     if item.get_captions():
-                        # print('captions')
                         response = web.Response(body='', headers={'CaptionInfo.sec': item.get_captions()}, content_type='text/html')#mimetype='text/html')
                         return response
                     response = web.Response(body='<html><p>Captions srt file not found</p></html>', status=HTTPStatus.NOT_FOUND, content_type='text/html')#mimetype='text/html')
@@ -361,44 +333,27 @@ class VideoServer:
             if part:
                 headers['Content-Range'] = f'bytes {start}-{end-1}/{size}'
             response = web.Response(body=generate(), status=HTTPStatus.PARTIAL_CONTENT if part else HTTPStatus.OK, headers=headers)#, direct_passthrough=True)
-            # print('outbound headers', response.headers)
             return response
-
-        # @app.route('/', defaults={'path': ''})
-        # @app.route('/<path:path>')
-        # @routes.get('/')
-        # async def catch_root(request):
-        #     print('*** catch_root')
-        #     return '', HTTPStatus.NOT_FOUND
 
         @routes.get('/{path:.*}')  # host and host/ will get here...other invalid urls will be caught by /{media_file}  # TODO: add a /m/ prefix to separate the two?
         async def catch_all(request):
-            path = request.match_info['path']
-            # print('*** catch_all', path)
+            # path = request.match_info['path']
             return web.Response(body='', status=HTTPStatus.NOT_FOUND)
 
     @staticmethod
-    # @aiohttp_jinja2.template('browse_error.xml')
     async def _browse_error(request, code):
-        # print(f'_browse_error {code}')
         assert code in [401, 402]
-        # rendered = render_template('.xml', code=code, desc='Invalid Action' if code == 401 else 'Invalid Args')
-        # return web.Response(rendered, HTTPStatus.INTERNAL_SERVER_ERROR, mimetype='text/xml')
-        # return {'code': code, 'desc': 'Invalid Action' if code == 401 else 'Invalid Args'}, \
         context = {'code': code, 'desc': 'Invalid Action' if code == 401 else 'Invalid Args'}
         response = aiohttp_jinja2.render_template('browse_error.xml', request, context, status=HTTPStatus.INTERNAL_SERVER_ERROR)
         response.headers['Content-Type'] = 'text/xml'
-        # response.headers['mimetype'] = 'text/xml'
         return response
 
-    # @aiohttp_jinja2.template('browse_result.xml')
     async def _handle_control(self, request):
         """Handle a SOAP command."""
         if 'text/xml' not in request.headers['content-type']:
             return self._browse_error(request, 401)
         data = await request.read()
         data = data.decode()
-        # print(f'_handle_control, {data}')
 
         def _parse():
             try:
@@ -429,19 +384,13 @@ class VideoServer:
         requested_count = int(method.find('RequestedCount').text)
 
         result, total_matches, num_returned, update_id = self._browse(browse_item, browse_direct_children, starting_index, requested_count)
-        # print(f'browse result {result}')
-        # NOTE: the result node will be escaped.  Using "|safe" will generate good looking xml, but clients will not be able to use it
-        # rendered = render_template('browse_result.xml', result=result, total_matches=total_matches, num_returned=num_returned, update_id=update_id)
-        # return web.Response(rendered, mimetype='text/xml')
         context = {'result': result, 'total_matches': total_matches, 'num_returned': num_returned, 'update_id': update_id}
         response = aiohttp_jinja2.render_template('browse_result.xml', request, context)
         response.headers['Content-Type'] = 'text/xml'
-        # response.headers['mimetype'] = 'text/xml'
         return response
 
     @staticmethod
     def _browse(browse_item: BaseItem, browse_direct_children: bool, starting_index: int, requested_count: int):
-        # print('_browse')
         object_id = browse_item.get_id()
 
         # Build result using Digital Item Description Language
@@ -625,13 +574,6 @@ def init():
     app = web.Application()
     template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')  # Make sure templates can be found if not running from that location
     aiohttp_jinja2.setup(app, loader=jinja2.FileSystemLoader(template_folder))
-    # app.router.add_get('/favicon.ico', VideoServer.fav_icon)
-    # app.router.add_get('/scpd.xml', VideoServer.scpd_xml)
-    # app.router.add_post('/ctrl', VideoServer.control)
-    # app.router.add_get('/desc.xml', VideoServer.desc_xml)
-    # app.router.add_get('/<media_file>', VideoServer.media)  # TODO: head as well? TODO: media_file argument?
-    # app.router.add_get('/', VideoServer.catch_all)
-    # app.router.add_get('/<path:path>', VideoServer.catch_all)
     app.add_routes(routes)
     return app
 
@@ -644,8 +586,6 @@ def main():
     parser.add_argument('--device_name', default='Videos')
     args = parser.parse_args()
 
-    logging.getLogger('werkzeug').setLevel(logging.ERROR)  # Disable flask request logging
-
     if not args.port:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind((args.host, 0))  # 0 = Use random port
@@ -654,9 +594,7 @@ def main():
     server = VideoServer(args.host, args.port, args.content_dir, args.device_name)
 
     print(f'running at {args.host}:{args.port}')
-    # app.run(host=args.host, port=args.port)  # , debug=True)
     web.run_app(init(), host=args.host, port=args.port)
-    # web.run_app(init(), host=args.host)
 
     print('stopping...')
     server.shutdown()
