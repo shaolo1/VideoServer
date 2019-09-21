@@ -6,7 +6,7 @@
     :copyright: 2018 by shao.lo@gmail.com
     :license: GPL3, see LICENSE for more details.
 """
-__version_info__ = (0, 0, 3)
+__version_info__ = (0, 0, 4)
 __version__ = '.'.join(map(str, __version_info__))
 __service_name__ = 'VideoServer'
 
@@ -242,6 +242,9 @@ class Content:
         id_ = self._get_id(path)
         if os.path.isdir(path):
             item = DirectoryItem(id_, path, self._urlbase, parent)
+        elif mime_type is None:
+            print(f'Unknown mime type for {path}')
+            return None
         elif mime_type.startswith('video/'):
             id_ += '.mp4'  # Captions won't work wo the extension!
             item = VideoItem(id_, path, self._urlbase, parent, mime_type)
@@ -348,7 +351,7 @@ class VideoServer:
             try:
                 tree = ElementTree.fromstring(request.data)
                 body = tree.find('{http://schemas.xmlsoap.org/soap/envelope/}Body')
-                method_ = body.getchildren()[0]
+                method_ = list(body)[0]
                 uri, method_name_ = method_.tag[1:].split('}')  # '{urn:schemas-upnp-org:service:ContentDirectory:1}Browse'
                 return method_, method_name_
             except Exception as e:
