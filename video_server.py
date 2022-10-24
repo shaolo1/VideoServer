@@ -6,7 +6,7 @@
     :copyright: 2018 by shao.lo@gmail.com
     :license: GPL3, see LICENSE for more details.
 """
-__version_info__ = (0, 0, 4)
+__version_info__ = (0, 0, 5)
 __version__ = '.'.join(map(str, __version_info__))
 __service_name__ = 'VideoServer'
 
@@ -34,7 +34,7 @@ from typing import List, Optional
 from urllib.parse import urljoin
 from xml.etree import ElementTree
 
-from flask import Flask, Response, request, render_template, send_file
+from flask import Flask, Response, request, render_template, send_from_directory
 
 app = Flask('app', template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'))  # Make sure templates can be found if not running from that location
 
@@ -292,7 +292,9 @@ class VideoServer:
             res = request.args.get('res')
             if res:
                 path = base64.b64decode(res.encode()).decode('ascii')
-                return send_file(path)
+                print(f'{res=} {path=} {content_dir=}')
+                # return send_file(path)  # using safer send_from_directory to prevent directory traversal attack
+                return send_from_directory(content_dir, res)
 
             item = self._file_store.get_by_id(media_file)
             if item is None:
@@ -338,14 +340,14 @@ class VideoServer:
 
     @staticmethod
     def _browse_error(code):
-        assert code in [401, 402]
-        rendered = render_template('browse_error.xml', code=code, desc='Invalid Action' if code == 401 else 'Invalid Args')
+        assert code in [HTTPStatus.UNAUTHORIZED, HTTPStatus.BAD_REQUEST]
+        rendered = render_template('browse_error.xml', code=code, desc='Invalid Action' if code == HTTPStatus.UNAUTHORIZED else 'Invalid Args')
         return Response(rendered, HTTPStatus.INTERNAL_SERVER_ERROR, mimetype='text/xml')
 
     def _handle_control(self):
         """Handle a SOAP command."""
         if 'text/xml' not in request.headers['content-type']:
-            return self._browse_error(401)
+            return self._browse_error(HTTPStatus.UNAUTHORIZED)
 
         def _parse():
             try:
@@ -360,17 +362,17 @@ class VideoServer:
 
         method, method_name = _parse()
         if method is None:
-            return self._browse_error(401)
+            return self._browse_error(HTTPStatus.UNAUTHORIZED)
         if method_name != 'Browse':
-            return self._browse_error(401)
+            return self._browse_error(HTTPStatus.UNAUTHORIZED)
         browse_flag = method.find('BrowseFlag')
         if browse_flag is None:
-            return self._browse_error(402)
+            return self._browse_error(HTTPStatus.BAD_REQUEST)
 
         object_id = method.find('ObjectID').text
         browse_item = self._file_store.get_by_id(object_id)
         if browse_item is None:
-            return self._browse_error(402)
+            return self._browse_error(HTTPStatus.BAD_REQUEST)
         browse_direct_children = browse_flag.text == 'BrowseDirectChildren'
         starting_index = int(method.find('StartingIndex').text)
         requested_count = int(method.find('RequestedCount').text)
@@ -378,6 +380,7 @@ class VideoServer:
         result, total_matches, num_returned, update_id = self._browse(browse_item, browse_direct_children, starting_index, requested_count)
         # NOTE: the result node will be escaped.  Using "|safe" will generate good looking xml, but clients will not be able to use it
         rendered = render_template('browse_result.xml', result=result, total_matches=total_matches, num_returned=num_returned, update_id=update_id)
+        print(f'{object_id=} {browse_item.get_name()=} {browse_item.get_path()=} {rendered=}')
         return Response(rendered, mimetype='text/xml')
 
     @staticmethod
