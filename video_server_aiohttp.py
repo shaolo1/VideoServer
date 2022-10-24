@@ -6,7 +6,7 @@
     :copyright: 2018 by shao.lo@gmail.com
     :license: GPL3, see LICENSE for more details.
 """
-__version_info__ = (0, 0, 2)
+__version_info__ = (0, 0, 3)
 __version__ = '.'.join(map(str, __version_info__))
 __service_name__ = 'VideoServer'
 
@@ -18,6 +18,7 @@ import base64
 import datetime
 import itertools
 import jinja2
+import logging
 import mimetypes
 import os
 import platform
@@ -34,7 +35,7 @@ from functools import partial
 from http import HTTPStatus
 from threading import Thread
 from typing import List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote, unquote
 from xml.etree import ElementTree
 
 routes = web.RouteTableDef()
@@ -56,14 +57,23 @@ class BaseItem(abc.ABC):
         self._cover = None
         self._captions = None
 
+    @property
+    def object_id(self):
+        return quote(self._object_id)  # Make sure spaces (and any other special characters are converted into %20 format)
+
     def add_child(self, child: 'BaseItem'):
         assert False
 
     def get_mime_type(self):
         return self._mime_type
 
-    def get_captions(self):
-        return self._captions
+    def _res_path(self, path: str) -> str:
+        base_url = self.get_url()
+        # hash_from_path = base64.b64encode(path.encode()).decode('ascii')
+        return f'{base_url}?res={quote(path)}'
+
+    def get_captions(self) -> str:
+        return self._res_path(self._captions)
 
     def get_children(self, start, end) -> List['BaseItem']:
         return []
@@ -72,7 +82,7 @@ class BaseItem(abc.ABC):
         return 0
 
     def get_id(self):
-        return self._object_id
+        return self.object_id
 
     def get_update_id(self):
         return 0  # Only containers have update_id
@@ -86,6 +96,9 @@ class BaseItem(abc.ABC):
     def get_parent(self):
         return self._parent
 
+    def get_url(self):
+        return urljoin(self._urlbase, self.object_id)
+
     @abc.abstractmethod
     def _element_name(self):
         return 'item'
@@ -96,7 +109,7 @@ class BaseItem(abc.ABC):
         return 'object'
 
     def to_element(self, object_id: str, browse_direct_children: bool):
-        root = ElementTree.Element(self._element_name(), {'id': self._object_id})
+        root = ElementTree.Element(self._element_name(), {'id': self.object_id})
         if self._parent is not None:
             root.attrib['parentID'] = self._parent.get_id()
 
@@ -106,15 +119,15 @@ class BaseItem(abc.ABC):
         ElementTree.SubElement(root, ElementTree.QName(dc_ns, 'date')).text = self._date.isoformat()
 
         if browse_direct_children:
-            if self._object_id not in [self.DEFAULT_ROOT_ID, root.attrib['parentID']]:
+            if self.object_id not in (self.DEFAULT_ROOT_ID, root.attrib['parentID']):
                 root.attrib['refID'] = root.attrib['id']
-                root.attrib['parentID'] = self._object_id
+                root.attrib['parentID'] = self.object_id
         else:
-            if self._object_id == self.DEFAULT_ROOT_ID:
+            if self.object_id == self.DEFAULT_ROOT_ID:
                 root.find(ElementTree.QName(dc_ns, 'title')).text = 'root'
-            if self._object_id != root.attrib['id']:
+            if self.object_id != root.attrib['id']:
                 root.attrib['refID'] = root.attrib['id']
-                root.attrib['id'] = self._object_id
+                root.attrib['id'] = self.object_id
         return root
 
     @staticmethod
@@ -144,31 +157,27 @@ class VideoItem(BaseItem):
     def _upnp_class(self):
         return super()._upnp_class() + '.item.videoItem'
 
-    @staticmethod
-    def _res_path(base_url, path):
-        hash_from_path = base64.b64encode(path.encode()).decode('ascii')
-        return f'{base_url}?res={hash_from_path}'
-
     def to_element(self, object_id: str, browse_direct_children: bool):
         root = super().to_element(object_id, browse_direct_children)
 
         stats = os.stat(self._file_path)
         size = stats.st_size
 
-        url = urljoin(self._urlbase, self._object_id)
+        url = self.get_url()
         root.append(self.res_element(url, self._mime_type, size))
         if self._cover:
             mime_type, _ = mimetypes.guess_type(self._cover, strict=False)
-            cover = self._res_path(url, self._cover)
-
             size = os.path.getsize(self._cover)
+            cover_res = self._res_path(self._cover)
             # DLNA.ORG_PN = More specific mime_type info ...tv won't display the images without the more specific mime_type
-            root.append(self.res_element(cover, mime_type, size, 'DLNA.ORG_PN=JPEG_TN'))
+            root.append(self.res_element(cover_res, mime_type, size, 'DLNA.ORG_PN=JPEG_TN'))
 # TODO: add resolution="1600x1200"..use pillow to get it..to see if this helps tv render better?
 # <res protocolInfo="http-get:*:image/jpeg:*" size="888322" resolution="1600x1200" colorDepth="24">http://xxx:49153/IMG.jpg</res>
 
-        if self._captions and self._captions.endswith('.srt'):
-            self._captions = self._res_path(url, self._captions)
+        # TODO: captions not appended to root here?
+        # if self._captions:
+        #     # print(f'{self._captions=}')
+        #     captions = self._res_path(self._captions)
         return root
 
 
@@ -218,6 +227,7 @@ class Content:
     def get_by_id(self, id_: str) -> BaseItem:
         if id_ == BaseItem.DEFAULT_ROOT_ID:  # Initial browse request will have default root ObjectID
             id_ = self._get_id(self._content_dir)
+        id_ = unquote(id_)
         return self._items.get(id_, None)
 
     def _add_items(self):
@@ -233,6 +243,7 @@ class Content:
 
     def _get_id(self, path):
         encode_path = self._content_dir if path == self._content_dir else path.replace(self._content_dir, '')
+        return encode_path
         return base64.b64encode(encode_path.encode()).decode('ascii')
 
     def _add_item(self, path: str, parent: Optional[BaseItem]):
@@ -243,10 +254,12 @@ class Content:
         if os.path.isdir(path):
             item = DirectoryItem(id_, path, self._urlbase, parent)
         elif mime_type is None:
-            print(f'Unknown mime type for {path}')
+            if not path.endswith('.md5'):  # ignore checksum files
+                print(f'Unknown mime type for {path}')
             return None
         elif mime_type.startswith('video/'):
-            id_ += '.mp4'  # Captions won't work wo the extension!
+            if not id_.endswith('.mp4'):
+                id_ += '.mp4'  # Captions won't work wo the extension!
             item = VideoItem(id_, path, self._urlbase, parent, mime_type)
         else:
             return None
@@ -258,46 +271,54 @@ class Content:
 
 class VideoServer:
     """Implements a subset of MediaServer:1 from http://upnp.org/specs/av/UPnP-av-MediaServer-v1-Device.pdf"""
-    def __init__(self, host, port, content_dir, friendly_name):
-        self._unique_device_name = 'video_server'
-        self._urlbase = f'http://{host}:{port}'
-
-        self._device_type = 'urn:schemas-upnp-org:device:MediaServer:1'
-        self._service_type = 'urn:schemas-upnp-org:service:ContentDirectory:1'
+    def __init__(self, host: str, port: int, content_dir: str, friendly_name: str):
+        self._unique_device_name: str = 'video_server'
+        self._urlbase: str = f'http://{host}:{port}'
+        self._device_type: str = 'urn:schemas-upnp-org:device:MediaServer:1'
+        self._service_type: str = 'urn:schemas-upnp-org:service:ContentDirectory:1'
 
         self._file_store = Content(content_dir, self._urlbase)
         self._ssdp_server = SSDPServer(self)
 
         @routes.get('/favicon.ico')
-        async def fav_icon(request):
+        async def fav_icon(request: web.Request) -> web.StreamResponse:
             return web.Response(body='', status=HTTPStatus.NOT_FOUND)
 
         @routes.get('/scpd.xml')
-        async def scpd_xml(request):
+        async def scpd_xml(request: web.Request) -> web.StreamResponse:
             """Service Control Point Definition"""
             response = aiohttp_jinja2.render_template('scpd.xml', request, {})
             response.headers['Content-Type'] = 'text/xml'
             return response
 
         @routes.post('/ctrl')
-        async def control(request):
+        async def control(request: web.Request) -> web.StreamResponse:
             return await self._handle_control(request)
 
         @routes.get('/desc.xml')
-        async def desc_xml(request):
+        async def desc_xml(request: web.Request) -> web.StreamResponse:
             context = {'udn': self._unique_device_name, 'device_type': self._device_type, 'service_type': self._service_type,
                        'friendly_name': friendly_name, 'model_name': __service_name__, 'version': __version__}
             response = aiohttp_jinja2.render_template('desc.xml', request, context)
             response.headers['Content-Type'] = 'text/xml'
             return response
 
-        @routes.get('/{media_file}')
-        async def media(request):
+        # @routes.get('/{media_file}')
+        @routes.get('/{media_file:.*}')
+        async def media(request: web.Request) -> web.StreamResponse:
             media_file = request.match_info['media_file']
             res = request.rel_url.query.get('res')
+            # if '.srt' in media_file:
+            #     print(f'media {media_file=}')
+            # print(f'media {media_file=}')
             if res:
-                path = base64.b64decode(res.encode()).decode('ascii')
-                return web.FileResponse(path)  # Return cover image
+                # path = base64.b64decode(res.encode()).decode('ascii')
+                path = res
+                try:
+                    return web.FileResponse(path)  # Return cover image
+                except FileNotFoundError as e:
+                    print(e)
+                    return web.Response(body='', status=HTTPStatus.NOT_FOUND)
 
             item = self._file_store.get_by_id(media_file)
             if item is None:
@@ -336,22 +357,23 @@ class VideoServer:
             return response
 
         @routes.get('/{path:.*}')  # host and host/ will get here...other invalid urls will be caught by /{media_file}  # TODO: add a /m/ prefix to separate the two?
-        async def catch_all(request):
-            # path = request.match_info['path']
+        async def catch_all(request: web.Request):
+            path = request.match_info['path']
+            # print(f'catch_all [{path=}] ')
             return web.Response(body='', status=HTTPStatus.NOT_FOUND)
 
     @staticmethod
-    async def _browse_error(request, code):
-        assert code in [401, 402]
-        context = {'code': code, 'desc': 'Invalid Action' if code == 401 else 'Invalid Args'}
+    async def _browse_error(request: web.Request, code) -> web.StreamResponse:
+        assert code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.BAD_REQUEST)
+        context = {'code': code, 'desc': 'Invalid Action' if code == HTTPStatus.UNAUTHORIZED else 'Invalid Args'}
         response = aiohttp_jinja2.render_template('browse_error.xml', request, context, status=HTTPStatus.INTERNAL_SERVER_ERROR)
         response.headers['Content-Type'] = 'text/xml'
         return response
 
-    async def _handle_control(self, request):
+    async def _handle_control(self, request: web.Request) -> web.StreamResponse:
         """Handle a SOAP command."""
         if 'text/xml' not in request.headers['content-type']:
-            return self._browse_error(request, 401)
+            return await self._browse_error(request, HTTPStatus.UNAUTHORIZED)
         data = await request.read()
         data = data.decode()
 
@@ -368,17 +390,17 @@ class VideoServer:
 
         method, method_name = _parse()
         if method is None:
-            return await self._browse_error(request, 401)
+            return await self._browse_error(request, HTTPStatus.UNAUTHORIZED)
         if method_name != 'Browse':
-            return await self._browse_error(request, 401)
+            return await self._browse_error(request, HTTPStatus.UNAUTHORIZED)
         browse_flag = method.find('BrowseFlag')
         if browse_flag is None:
-            return await self._browse_error(request, 402)
+            return await self._browse_error(request, HTTPStatus.BAD_REQUEST)
 
         object_id = method.find('ObjectID').text
         browse_item = self._file_store.get_by_id(object_id)
         if browse_item is None:
-            return await self._browse_error(request, 402)
+            return await self._browse_error(request, HTTPStatus.BAD_REQUEST)
         browse_direct_children = browse_flag.text == 'BrowseDirectChildren'
         starting_index = int(method.find('StartingIndex').text)
         requested_count = int(method.find('RequestedCount').text)
@@ -457,8 +479,8 @@ class SSDPServer(asyncio.DatagramProtocol):
     def __init__(self, server):
         self._server = server
 
-        @asyncio.coroutine
-        def _connect():
+        #@asyncio.coroutine
+        async def _connect():
             info = socket.getaddrinfo(SSDPServer.ADDRESS, None)[0]
             sock = socket.socket(info[0], socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -471,7 +493,8 @@ class SSDPServer(asyncio.DatagramProtocol):
             else:
                 group = group_bin + struct.pack('@I', 0)
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, group)
-            yield from asyncio.get_event_loop().create_datagram_endpoint(lambda: self, sock=sock)
+            #yield from asyncio.get_event_loop().create_datagram_endpoint(lambda: self, sock=sock)
+            await asyncio.get_event_loop().create_datagram_endpoint(lambda: self, sock=sock)
 
         def _run(loop):
             asyncio.set_event_loop(loop)
@@ -496,7 +519,7 @@ class SSDPServer(asyncio.DatagramProtocol):
         if target != '*':
             return
         if method == 'M-SEARCH':
-            headers = {x.lower(): y for x, y in (line.replace(': ', ':', 1).split(':', 1) for line in lines[1:] if len(line) > 0)}
+            headers = {x.lower(): y for x, y in (line.replace(': ', ':', 1).split(':', 1) for line in lines[1:] if line)}
             self._m_search_received(headers, host_port)
 
     def register_local(self, unique_device_name, search_target, location=''):
@@ -580,7 +603,7 @@ def init():
 
 def main():
     parser = argparse.ArgumentParser(description='Video Server')
-    parser.add_argument('--host', required=True, help="Won't be accessible to other devices (computers/TVs) if localhost is used!")
+    parser.add_argument('--host', required=True, help="Won't be accessible to other devices (computers/TVs) if localhost or 0.0.0.0 is used!")
     parser.add_argument('--port', default=0, type=int, help='Using 0 results in a random port.')
     parser.add_argument('--content_dir', required=True, help='The path of the video files to serve.')
     parser.add_argument('--device_name', default='Videos')
@@ -588,10 +611,12 @@ def main():
 
     if not args.port:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print(f'generating random port for {args.host}')
         sock.bind((args.host, 0))  # 0 = Use random port
         args.port = sock.getsockname()[1]
         sock.close()
     server = VideoServer(args.host, args.port, args.content_dir, args.device_name)
+    # logging.basicConfig(level=logging.DEBUG)
 
     print(f'running at {args.host}:{args.port}')
     web.run_app(init(), host=args.host, port=args.port)
